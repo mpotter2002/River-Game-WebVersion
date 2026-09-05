@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Chicago River Clean Up</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #141918; color: #f5f7f6; }
+    main { height: 100vh; height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 8px; }
+    #player { width: min(100%, calc((100dvh - 60px) * 9 / 16)); }
+    #stage { position: relative; aspect-ratio: 9 / 16; background: #091514; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+    #loading, #paused { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 24px; background: #122825ed; }
+    #paused { background: #122825cc; }
+    [hidden] { display: none !important; }
+    h1 { font-size: 24px; margin: 0 0 24px; line-height: 1.2; }
+    progress { width: 100%; height: 8px; accent-color: #62d6ae; }
+    #status { font-size: 14px; color: #d4e4df; }
+    nav { height: 44px; display: flex; align-items: center; gap: 4px; }
+    nav span { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #bac9c4; }
+    nav button { flex-shrink: 0; }
+    button { border: 0; background: transparent; color: inherit; width: 40px; height: 40px; padding: 10px; cursor: pointer; border-radius: 4px; }
+    button:hover, button:focus-visible { background: #344840; outline: 2px solid #62d6ae; }
+    button:disabled { opacity: .3; cursor: default; }
+    button svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; }
+    #resume { width: auto; padding: 8px 24px; background: #25694e; font-size: 16px; }
+    #player:fullscreen { width: 100%; height: 100%; background: #141918; display: flex; align-items: center; flex-direction: column; justify-content: center; }
+    #player:fullscreen #stage { width: min(100%, calc((100dvh - 44px) * 9 / 16)); }
+    #player:fullscreen nav { width: min(100%, calc((100dvh - 44px) * 9 / 16)); }
+  </style>
+</head>
+<body>
+<main>
+  <section id="player" aria-label="Chicago River Clean Up game">
+    <div id="stage">
+      <canvas id="unity-canvas" width="540" height="960" tabindex="0" aria-label="River cleanup game"></canvas>
+      <div id="loading">
+        <h1>Chicago River<br>Clean Up</h1>
+        <progress id="progress" max="1" value="0" aria-label="Loading game"></progress>
+        <p id="status" role="status">Loading the river...</p>
+      </div>
+      <div id="paused" hidden><h1>Paused</h1><button id="resume">Resume</button></div>
+    </div>
+    <nav aria-label="Game controls">
+      <span>Chicago River Clean Up</span>
+      <button id="pause" title="Pause" aria-label="Pause game" disabled></button>
+      <button id="fullscreen" title="Fullscreen" aria-label="Enter fullscreen"></button>
+    </nav>
+  </section>
+</main>
+<script src="icons.js"></script>
+<script>
+  const canvas = document.querySelector("canvas");
+  const pauseButton = document.querySelector("#pause");
+  const fullscreenButton = document.querySelector("#fullscreen");
+  pauseButton.innerHTML = window.riverIcons.pause;
+  fullscreenButton.innerHTML = window.riverIcons.maximize;
+  let game, paused = false;
+  function setPaused(value) {
+    if (!game) return;
+    paused = value;
+    game.SendMessage("BrowserSession", "SetPaused", value ? "1" : "0");
+    document.querySelector("#paused").hidden = !value;
+    pauseButton.innerHTML = window.riverIcons[value ? "play" : "pause"];
+    pauseButton.setAttribute("aria-label", value ? "Resume game" : "Pause game");
+    pauseButton.title = value ? "Resume" : "Pause";
+    if (!value) canvas.focus();
+  }
+  pauseButton.onclick = () => setPaused(!paused);
+  document.querySelector("#resume").onclick = () => setPaused(false);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) setPaused(true); });
+  window.addEventListener("keydown", event => {
+    if (event.key === "Escape" && game) { event.preventDefault(); setPaused(!paused); }
+  });
+  fullscreenButton.onclick = async () => {
+    const player = document.querySelector("#player");
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (player.requestFullscreen) await player.requestFullscreen();
+    } catch (error) { console.warn("Fullscreen unavailable", error); }
+  };
+  if (!document.fullscreenEnabled) fullscreenButton.hidden = true;
+  document.addEventListener("fullscreenchange", () => {
+    const full = !!document.fullscreenElement;
+    fullscreenButton.innerHTML = window.riverIcons[full ? "minimize" : "maximize"];
+    fullscreenButton.setAttribute("aria-label", full ? "Exit fullscreen" : "Enter fullscreen");
+  });
+  const script = document.createElement("script");
+  script.src = "Build/Web.loader.js";
+  const showError = message => {
+    document.querySelector("#loading").hidden = false;
+    document.querySelector("#status").textContent = message;
+    document.querySelector("#progress").hidden = true;
+  };
+  script.onerror = () => showError("Could not load the game. Reload to try again.");
+  script.onload = () => createUnityInstance(canvas, {
+    dataUrl: "Build/Web.data",
+    frameworkUrl: "Build/Web.framework.js",
+    codeUrl: "Build/Web.wasm",
+    streamingAssetsUrl: "StreamingAssets",
+    companyName: "DefaultCompany",
+    productName: "Chicago River Clean Up",
+    productVersion: "1.0",
+    devicePixelRatio: Math.min(window.devicePixelRatio || 1, 1.5),
+    showBanner: (message, type) => { if (type === "error") showError(message); else console.warn(message); }
+  }, progress => document.querySelector("#progress").value = progress).then(instance => {
+    game = instance;
+    window.riverGame = instance;
+    document.querySelector("#loading").hidden = true;
+    pauseButton.disabled = false;
+    canvas.focus();
+    if (document.hidden) setPaused(true);
+  }).catch(error => showError("Unable to start the game: " + error));
+  document.body.appendChild(script);
+</script>
+</body>
+</html>
